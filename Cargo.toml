@@ -4,13 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+#linfa-preprocessing = { version = "0.7.1", default-features = false }
 linfa-preprocessing = { git = "https://github.com/kakserpom/linfa.git", branch = "linfa-preprocessing-multi-threading", default-features = false }
-ndarray = "0.15.6"
-hnsw_rs = "0.3.1"
-rayon = "1.10.0"
+ndarray = "0.15"
 sprs = "0.11"
-itertools = "0.10.5"
-criterion = "0.5.1"
 
 [dev-dependencies]
 criterion = "0.5"
