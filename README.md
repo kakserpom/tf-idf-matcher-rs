@@ -1,4 +1,4 @@
-**TF-IDF Matcher in Rust**
+# tf-idf-matcher
 
 A lightweight Rust library for approximate string matching using [TF–IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf)
 vectorization and cosine similarity. The matcher
@@ -6,6 +6,7 @@ converts strings into n‑gram [TF–IDF](https://en.wikipedia.org/wiki/Tf%E2%80
 scores to rank the closest matches in a corpus.
 
 This project is heavily inspired by the Python package [tfidf-matcher](https://pypi.org/project/tfidf-matcher/).
+The Rust implementation is more performant and more ergonomic.
 
 ---
 
@@ -14,7 +15,7 @@ This project is heavily inspired by the Python package [tfidf-matcher](https://p
 - Generate n‑gram tokenization (configurable n‑gram length)
 - Fit and transform a corpus of documents to sparse [TF–IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) matrices
 - Compute cosine similarity between query strings and the corpus
-- Retrieve top‑k matches with confidence scores (0.00–100.00)
+- Retrieve top‑k matches with confidence scores ∈ `[0,1]`
 - Expose feature indices for deeper analysis
 
 ## Installation
@@ -46,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     // Build the matcher with 3‑gram tokenization
-    let matcher = TFIDFMatcher::new(corpus.clone(), 3)?;
+    let matcher = TFIDFMatcher::new(corpus, 3)?;
 
     // Find the best match for a single query
     let result = matcher.find_one("quick fox", 3)?;

@@ -1,5 +1,5 @@
 [package]
-name = "tfidf-matcher"
+name = "tf-idf-matcher"
 version = "0.1.0"
 edition = "2024"
 
