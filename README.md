@@ -24,19 +24,13 @@ Add this crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tfidf-matcher = "0.1"
-```
-
-Then include it in your code:
-
-```rust
-use tfidf_matcher::TFIDFMatcher;
+tf-idf-matcher = "0.1"
 ```
 
 ## Quick Start
 
 ```rust
-use tfidf_matcher::{TFIDFMatcher, Needle};
+use tf_idf_matcher::{TFIDFMatcher, Needle};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Prepare a list of documents (corpus)
