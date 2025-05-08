@@ -79,7 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   Returns a vector of `Needle` structs, one per query string.
 
 - `features(&self, needle: &str)`  
-  Returns the indices of active TF-IDF Veatures for a given query.
+  Returns the indices of active TF-IDF features for a given query.
 
 ## Contributing
 
