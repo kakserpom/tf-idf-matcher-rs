@@ -1,7 +1,10 @@
+#![warn(clippy::pedantic)]
+
 use linfa_preprocessing::PreprocessingError;
 use linfa_preprocessing::tf_idf_vectorization::{FittedTfIdfVectorizer, TfIdfVectorizer};
 use ndarray::Array1;
 use sprs::CsMat;
+use std::cmp::Ordering::Equal;
 
 #[cfg(test)]
 mod tests;
@@ -61,7 +64,7 @@ impl TFIDFMatcher {
     pub fn new(haystack: Vec<String>, ngram_length: usize) -> Result<Self, PreprocessingError> {
         let processed_haystack: Vec<String> = haystack
             .iter()
-            .map(|s| preprocess(&s, ngram_length))
+            .map(|s| preprocess(s, ngram_length))
             .collect();
 
         let fitted = TfIdfVectorizer::default()
@@ -102,7 +105,7 @@ impl TFIDFMatcher {
     /// Get active TF-IDF features for a needle
     pub fn features(&self, needle: &str) -> Vec<usize> {
         self.fitted
-            .transform(&Array1::from(vec![preprocess(&needle, self.ngram_length)]))
+            .transform(&Array1::from(vec![preprocess(needle, self.ngram_length)]))
             .expect("Transform failed")
             .outer_view(0)
             .expect("Outer view failed")
@@ -117,7 +120,7 @@ impl TFIDFMatcher {
         top_k: usize,
     ) -> Result<Vec<Needle<'a>>, PreprocessingError> {
         let needles_tfidf = self.fitted.transform(&Array1::from_iter(
-            needles.iter().map(|s| preprocess(&s, self.ngram_length)),
+            needles.iter().map(|s| preprocess(s, self.ngram_length)),
         ))?;
 
         let needles_norm: Vec<f64> = needles_tfidf
@@ -144,10 +147,10 @@ impl TFIDFMatcher {
                     .collect();
                 let k = top_k.min(similarities.len());
                 let matches = if k > 0 {
-                    similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                    similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
                     let top_k = &similarities[..k];
                     top_k
-                        .into_iter()
+                        .iter()
                         .map(|(idx, sim)| MatchEntry {
                             haystack: &self.haystack[*idx],
                             haystack_idx: *idx,
