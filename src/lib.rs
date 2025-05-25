@@ -20,7 +20,13 @@ fn preprocess(text: &str, n: usize) -> String {
         return String::new();
     }
     (0..=chars.len() - n)
-        .map(|i| String::from_iter(&chars[i..i + n]))
+        .filter_map(|i| {
+            if chars[i + 1..i + n - 1].contains(&'_') {
+                None
+            } else {
+                Some(String::from_iter(&chars[i..i + n]))
+            }
+        })
         .join(" ")
 }
 
@@ -62,10 +68,17 @@ pub struct TFIDFMatcher {
 }
 
 impl TFIDFMatcher {
-    pub fn new(haystack: Vec<String>, ngram_length: usize) -> Result<Self, PreprocessingError> {
+    pub fn new<T>(
+        haystack: impl IntoIterator<Item = T>,
+        ngram_length: usize,
+    ) -> Result<Self, PreprocessingError>
+    where
+        T: Into<String>,
+    {
+        let haystack: Vec<String> = haystack.into_iter().map(Into::into).collect();
         let processed_haystack: Vec<String> = haystack
             .iter()
-            .map(|s| preprocess(s, ngram_length))
+            .map(|s| preprocess(&s, ngram_length))
             .collect();
 
         let fitted = TfIdfVectorizer::default()
@@ -81,7 +94,7 @@ impl TFIDFMatcher {
             .collect();
 
         Ok(Self {
-            haystack,
+            haystack: haystack.into_iter().collect(),
             ngram_length,
             fitted,
             haystack_tfidf,
