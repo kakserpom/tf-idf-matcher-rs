@@ -1,15 +1,17 @@
 use super::*;
 
 #[test]
-fn test_ngrams_basic() {
-    let result = ngrams("abcde", 2);
-    assert_eq!(result, vec!["ab", "bc", "cd", "de"]);
+fn test_preprocess() {
+    let result = preprocess("abcde", 2);
+    assert_eq!(result, "ab bc cd de");
+
+    let result = preprocess("abc de", 2);
+    assert_eq!(result, "ab bc c_ _d de");
 }
 
 #[test]
 fn test_ngrams_shorter_than_n() {
-    let result: Vec<String> = ngrams("a", 2);
-    assert!(result.is_empty());
+    assert_eq!(preprocess("a", 2), "");
 }
 
 #[test]

@@ -1,5 +1,5 @@
 #![warn(clippy::pedantic)]
-
+use itertools::Itertools;
 use linfa_preprocessing::PreprocessingError;
 use linfa_preprocessing::tf_idf_vectorization::{FittedTfIdfVectorizer, TfIdfVectorizer};
 use ndarray::Array1;
@@ -9,18 +9,14 @@ use std::cmp::Ordering::Equal;
 #[cfg(test)]
 mod tests;
 
-fn ngrams(text: &str, n: usize) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
+fn preprocess(text: &str, n: usize) -> String {
+    let chars: Vec<char> = text.to_lowercase().split_whitespace().join("_").chars().collect();
     if chars.len() < n {
-        return vec![];
+        return String::new();
     }
     (0..=chars.len() - n)
-        .map(|i| chars[i..i + n].iter().collect())
-        .collect()
-}
-
-fn preprocess(text: &str, n: usize) -> String {
-    ngrams(&text.to_lowercase(), n).join(" ")
+        .map(|i| String::from_iter(&chars[i..i + n]))
+        .join(" ")
 }
 
 #[derive(Debug)]
