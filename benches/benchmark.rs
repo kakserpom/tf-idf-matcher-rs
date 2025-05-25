@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use tfidf_matcher::{MatchEntry, Needle, TFIDFMatcher};
+use tf_idf_matcher::{Needle, TFIDFMatcher};
 
 fn make_sample_data(n: usize) -> Vec<String> {
     let names = vec![

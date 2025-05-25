@@ -10,7 +10,12 @@ use std::cmp::Ordering::Equal;
 mod tests;
 
 fn preprocess(text: &str, n: usize) -> String {
-    let chars: Vec<char> = text.to_lowercase().split_whitespace().join("_").chars().collect();
+    let chars: Vec<char> = text
+        .to_lowercase()
+        .split_whitespace()
+        .join("_")
+        .chars()
+        .collect();
     if chars.len() < n {
         return String::new();
     }
@@ -65,7 +70,6 @@ impl TFIDFMatcher {
 
         let fitted = TfIdfVectorizer::default()
             .convert_to_lowercase(false)
-            .n_gram_range(1, 1)
             .fit::<String, _>(&Array1::from_vec(processed_haystack.clone()))
             .expect("TF-IDF training failed");
 
