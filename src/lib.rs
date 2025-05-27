@@ -10,12 +10,14 @@ use std::cmp::Ordering::Equal;
 mod tests;
 
 fn preprocess(text: &str, n: usize) -> String {
-    let chars: Vec<char> = text
+    let mut chars: Vec<char> = text
         .to_lowercase()
         .split_whitespace()
         .join("_")
         .chars()
         .collect();
+    chars.insert(0, '_');
+    chars.push('_');
     if chars.len() < n {
         return String::new();
     }
@@ -58,6 +60,19 @@ impl Needle<'_> {
         }
     }
 }
+
+trait Normalize {
+    fn normalize(&self) -> Vec<f64>;
+}
+impl Normalize for CsMat<f64> {
+    #[inline]
+    fn normalize(&self) -> Vec<f64> {
+        self.outer_iterator()
+            .map(|row| row.data().iter().map(|x| x * x).sum::<f64>().sqrt())
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TFIDFMatcher {
     haystack: Vec<String>,
@@ -87,18 +102,12 @@ impl TFIDFMatcher {
             .expect("TF-IDF training failed");
 
         let haystack_tfidf = fitted.transform(&Array1::from_vec(processed_haystack))?;
-
-        let haystack_norm: Vec<f64> = haystack_tfidf
-            .outer_iterator()
-            .map(|row| row.data().iter().map(|x| x * x).sum::<f64>().sqrt())
-            .collect();
-
         Ok(Self {
             haystack: haystack.into_iter().collect(),
             ngram_length,
             fitted,
+            haystack_norm: haystack_tfidf.normalize(),
             haystack_tfidf,
-            haystack_norm,
         })
     }
 
@@ -129,17 +138,15 @@ impl TFIDFMatcher {
     /// Find many needles
     pub fn find_many<'a>(
         &'a self,
-        needles: Vec<&'a str>,
+        needles: impl Into<Vec<&'a str>>,
         top_k: usize,
     ) -> Result<Vec<Needle<'a>>, PreprocessingError> {
+        let needles = needles.into();
         let needles_tfidf = self.fitted.transform(&Array1::from_iter(
             needles.iter().map(|s| preprocess(s, self.ngram_length)),
         ))?;
 
-        let needles_norm: Vec<f64> = needles_tfidf
-            .outer_iterator()
-            .map(|row| row.data().iter().map(|x| x * x).sum::<f64>().sqrt())
-            .collect();
+        let needles_norm: Vec<f64> = needles_tfidf.normalize();
 
         let sim_matrix = &needles_tfidf * &self.haystack_tfidf.transpose_view();
 
