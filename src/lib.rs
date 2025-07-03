@@ -4,7 +4,8 @@ use linfa_preprocessing::PreprocessingError;
 use linfa_preprocessing::tf_idf_vectorization::{FittedTfIdfVectorizer, TfIdfVectorizer};
 use ndarray::Array1;
 use sprs::CsMat;
-use std::cmp::Ordering::Equal;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 #[cfg(test)]
 mod tests;
@@ -82,6 +83,27 @@ pub struct TFIDFMatcher {
     haystack_norm: Vec<f64>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Scored {
+    sim: f64,
+    idx: usize,
+}
+
+impl Eq for Scored {}
+
+impl PartialOrd for Scored {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.sim.partial_cmp(&other.sim)
+    }
+}
+
+impl Ord for Scored {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // на случай NaN
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+    }
+}
+
 impl TFIDFMatcher {
     pub fn new<T>(
         haystack: impl IntoIterator<Item = T>,
@@ -103,7 +125,7 @@ impl TFIDFMatcher {
 
         let haystack_tfidf = fitted.transform(&Array1::from_vec(processed_haystack))?;
         Ok(Self {
-            haystack: haystack.into_iter().collect(),
+            haystack,
             ngram_length,
             fitted,
             haystack_norm: haystack_tfidf.normalize(),
@@ -141,13 +163,11 @@ impl TFIDFMatcher {
         needles: impl Into<Vec<&'a str>>,
         top_k: usize,
     ) -> Result<Vec<Needle<'a>>, PreprocessingError> {
-        let needles = needles.into();
+        let needles: Vec<&str> = needles.into();
         let needles_tfidf = self.fitted.transform(&Array1::from_iter(
             needles.iter().map(|s| preprocess(s, self.ngram_length)),
         ))?;
-
-        let needles_norm: Vec<f64> = needles_tfidf.normalize();
-
+        let needles_norm = needles_tfidf.normalize();
         let sim_matrix = &needles_tfidf * &self.haystack_tfidf.transpose_view();
 
         Ok(needles
@@ -155,31 +175,26 @@ impl TFIDFMatcher {
             .zip(sim_matrix.outer_iterator().enumerate())
             .map(|(needle, (i, row))| {
                 let q_norm = needles_norm[i];
+                let mut heap: BinaryHeap<Scored> = BinaryHeap::new();
+                for (col_idx, &dot_val) in row.iter() {
+                    let denom = q_norm * self.haystack_norm[col_idx];
+                    let sim = if denom == 0.0 { 0.0 } else { dot_val / denom };
+                    heap.push(Scored { sim, idx: col_idx });
+                }
+                
+                let mut matches = Vec::with_capacity(top_k);
+                for _ in 0..top_k {
+                    if let Some(scored) = heap.pop() {
+                        matches.push(MatchEntry {
+                            haystack: &self.haystack[scored.idx],
+                            haystack_idx: scored.idx,
+                            confidence: (scored.sim * 100.0).round() / 100.0,
+                        });
+                    } else {
+                        break;
+                    }
+                }
 
-                let mut similarities: Vec<(usize, f64)> = row
-                    .iter()
-                    .map(|dot| {
-                        let (col_idx, dot_val) = dot;
-                        let denom = q_norm * self.haystack_norm[col_idx];
-                        let sim = if denom == 0.0 { 0.0 } else { dot_val / denom };
-                        (col_idx, sim)
-                    })
-                    .collect();
-                let k = top_k.min(similarities.len());
-                let matches = if k > 0 {
-                    similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
-                    let top_k = &similarities[..k];
-                    top_k
-                        .iter()
-                        .map(|(idx, sim)| MatchEntry {
-                            haystack: &self.haystack[*idx],
-                            haystack_idx: *idx,
-                            confidence: (*sim * 100.0).round() / 100.0,
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
                 Needle { needle, matches }
             })
             .collect())

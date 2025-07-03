@@ -23,16 +23,13 @@ fn bench_tfidf(c: &mut Criterion) {
     let matcher = TFIDFMatcher::new(haystack, 3).unwrap();
     let needle = "putinvladimir";
 
-    c.bench_function("TFIDFMatcher::find_one", |b| {
+    let mut group = c.benchmark_group("tfidf");
+
+    group.sample_size(10_000);
+
+    group.bench_function("TFIDFMatcher::find_one", |b| {
         b.iter(|| {
             let _res: Needle = matcher.find_one(needle, 5).unwrap();
-        })
-    });
-
-    c.bench_function("TFIDFMatcher::new", |b| {
-        let data = make_sample_data(20_000);
-        b.iter(|| {
-            let _ = TFIDFMatcher::new(data.clone(), 3);
         })
     });
 }
