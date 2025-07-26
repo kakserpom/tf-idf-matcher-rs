@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matcher = TFIDFMatcher::new(corpus, 3)?;
 
     // Find the best match for a single query
-    let result = matcher.find_one("quick fox", 3)?;
+    let result = matcher.find("quick fox", 3)?;
     println!("Query: {}", result.needle);
     for entry in result.matches {
         println!(
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `TFIDFMatcher::new(haystack: Vec<String>, ngram_length: usize)`  
   Creates a new matcher from a list of strings, using n‑gram TF-IDF vectorization.
 
-- `find_one(&self, needle: &str, top_k: usize)`  
+- `find(&self, needle: &str, top_k: usize)`  
   Returns a `Needle` containing the top‑`k` matches for a single query.
 
 - `find_many(&self, needles: Vec<&str>, top_k: usize)`  

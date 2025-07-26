@@ -1,33 +1,41 @@
 use super::*;
-/*
+
 #[test]
-fn test_preprocess() {
-    let result = preprocess("abcde", 2);
+fn test_text_into_ngrams() {
+    let result = TFIDFMatcher::text_into_ngrams("abcde", 2);
     assert_eq!(result, "_a ab bc cd de e_");
 
-    let result = preprocess("abc de", 2);
+    let result = TFIDFMatcher::text_into_ngrams("abc de", 2);
     assert_eq!(result, "_a ab bc c_ _d de e_");
 
-    let result = preprocess("lets get rusty", 3);
+    let result = TFIDFMatcher::text_into_ngrams("lets get rusty", 3);
     assert_eq!(result, "_le let ets ts_ _ge get et_ _ru rus ust sty ty_");
 }
 
 #[test]
 fn test_ngrams_shorter_than_n() {
-    assert_eq!(preprocess("a", 2), "_a a_");
+    assert_eq!(TFIDFMatcher::text_into_ngrams("a", 2), "_a a_");
 }
 
 #[test]
-fn test_preprocess_lowercase_and_join() {
-    let result = preprocess("AbCd", 2);
+fn test_text_into_ngrams_lowercase_and_join() {
+    let result = TFIDFMatcher::text_into_ngrams("AbCd", 2);
     assert_eq!(result, "_a ab bc cd d_");
-}*/
+}
 
 #[test]
-fn test_tfidf_matcher_find_one() {
+fn test_tfidf_matcher_find_short() {
+    let matcher = TFIDFMatcher::new(["adf"], 2).expect("Failed to create matcher");
+    let result = matcher.find("atf", 2).expect("find failed");
+    println!("{:?}", result);
+    assert!(result.matches[0].confidence >= 0.7);
+}
+
+#[test]
+fn test_tfidf_matcher_find() {
     let matcher =
         TFIDFMatcher::new(["testddd", "testing", "example"], 3).expect("Failed to create matcher");
-    let result = matcher.find_one("testddd", 2).expect("find_one failed");
+    let result = matcher.find("testddd", 2).expect("find failed");
 
     println!("{:?}", result);
     // The top match for "test" should be itself with 100.0 confidence
@@ -93,9 +101,7 @@ fn test_bench() {
         3,
     )
     .unwrap();
-    let result = matcher
-        .find_one("putinvladimir", 2)
-        .expect("find_one failed");
+    let result = matcher.find("putinvladimir", 2).expect("find failed");
     println!("{:?}", result);
     assert_eq!(result.matches[0].haystack, "Vladimir Putin");
 }
