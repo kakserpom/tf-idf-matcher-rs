@@ -29,7 +29,7 @@ fn bench_tfidf(c: &mut Criterion) {
 
     group.bench_function("TFIDFMatcher::find_one", |b| {
         b.iter(|| {
-            let _res: Needle = matcher.find_one(needle, 5).unwrap();
+            let _res: Needle = matcher.find(needle, 5).unwrap();
         })
     });
 }
