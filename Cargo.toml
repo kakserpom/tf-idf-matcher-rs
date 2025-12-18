@@ -1,6 +1,6 @@
 [package]
 name = "tf-idf-matcher"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [workspace]
@@ -12,7 +12,7 @@ ndarray = "0.15"
 sprs = "0.11"
 
 [dev-dependencies]
-criterion = "0.7"
+criterion = "0.8.1"
 
 [[bench]]
 name = "benchmark"
