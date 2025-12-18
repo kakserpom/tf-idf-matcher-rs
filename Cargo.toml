@@ -3,8 +3,9 @@ name = "tf-idf-matcher"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+
 [dependencies]
-itertools = "0.14.0"
 #linfa-preprocessing = { version = "0.7.1", default-features = false }
 linfa-preprocessing = { git = "https://github.com/kakserpom/linfa.git", branch = "linfa-preprocessing-multi-threading", default-features = false }
 ndarray = "0.15"

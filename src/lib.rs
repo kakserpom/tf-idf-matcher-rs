@@ -1,5 +1,4 @@
 #![warn(clippy::pedantic)]
-use itertools::Itertools;
 use linfa_preprocessing::tf_idf_vectorization::{FittedTfIdfVectorizer, TfIdfVectorizer};
 use linfa_preprocessing::{PreprocessingError, Tokenizer};
 use ndarray::Array1;
@@ -10,16 +9,25 @@ use std::collections::BinaryHeap;
 
 #[cfg(test)]
 mod tests;
-#[derive(Debug)]
+/// A single match result from the corpus.
+#[derive(Debug, Clone)]
+#[must_use]
 pub struct MatchEntry<'a> {
+    /// The matched string from the corpus.
     pub haystack: &'a str,
+    /// Similarity score between 0.0 and 1.0.
     pub confidence: f64,
+    /// Index of this match in the original corpus.
     pub haystack_idx: usize,
 }
 
-#[derive(Debug)]
+/// Container for query results, holding the original query and its matches.
+#[derive(Debug, Clone)]
+#[must_use]
 pub struct Needle<'a> {
+    /// The original query string.
     pub needle: &'a str,
+    /// The top-k matches ranked by confidence.
     pub matches: Vec<MatchEntry<'a>>,
 }
 
@@ -51,6 +59,7 @@ impl Normalize for CsMat<f64> {
     }
 }
 
+/// A TF-IDF based string matcher for finding approximate matches in a corpus.
 #[derive(Debug, Clone)]
 pub struct TFIDFMatcher {
     haystack: Vec<String>,
@@ -58,6 +67,12 @@ pub struct TFIDFMatcher {
     haystack_tfidf: CsMat<f64>,
     haystack_norm: Vec<f64>,
     ngram_length: usize,
+}
+
+/// Rounds a similarity score to 2 decimal places.
+#[inline]
+fn round_confidence(sim: f64) -> f64 {
+    (sim * 100.0).round() / 100.0
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -68,41 +83,66 @@ struct Scored {
 
 impl Eq for Scored {}
 
-impl PartialOrd for Scored {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        other.sim.partial_cmp(&self.sim)
+impl Ord for Scored {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reversed comparison for min-heap behavior
+        other.sim.partial_cmp(&self.sim).unwrap_or(Equal)
     }
 }
 
-impl Ord for Scored {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.partial_cmp(self).unwrap_or(Equal)
+impl PartialOrd for Scored {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 impl TFIDFMatcher {
     fn text_into_ngrams(text: &str, n: usize) -> String {
-        let mut chars: Vec<char> = text
-            .to_lowercase()
-            .split_whitespace()
-            .join("_")
-            .chars()
-            .collect();
-        chars.insert(0, '_');
+        // Pre-calculate capacity: text length + underscores + 2 boundary chars
+        let word_count = text.split_whitespace().count();
+        let estimated_len = text.len() + word_count.saturating_sub(1) + 2;
+        let mut chars = Vec::with_capacity(estimated_len);
+
+        // Build character sequence: _word1_word2_
         chars.push('_');
+        let mut first = true;
+        for word in text.split_whitespace() {
+            if !first {
+                chars.push('_');
+            }
+            first = false;
+            chars.extend(word.chars().flat_map(char::to_lowercase));
+        }
+        chars.push('_');
+
         if chars.len() < n {
             return String::new();
         }
-        (0..=chars.len() - n)
-            .filter_map(|i| {
-                if chars[i + 1..i + n - 1].contains(&'_') {
-                    None
-                } else {
-                    Some(String::from_iter(&chars[i..i + n]))
-                }
-            })
-            .join(" ")
+
+        // Estimate result capacity: ~(n+1) chars per n-gram including space
+        let ngram_count = chars.len() - n + 1;
+        let mut result = String::with_capacity(ngram_count * (n + 1));
+
+        for i in 0..=chars.len() - n {
+            // Skip n-grams that cross word boundaries (have _ in middle)
+            if n > 2 && chars[i + 1..i + n - 1].contains(&'_') {
+                continue;
+            }
+            if !result.is_empty() {
+                result.push(' ');
+            }
+            result.extend(&chars[i..i + n]);
+        }
+        result
     }
+    /// Creates a new TF-IDF matcher from a corpus of strings.
+    ///
+    /// # Arguments
+    /// * `haystack` - The corpus of strings to match against.
+    /// * `ngram_length` - The length of n-grams to use (e.g., 3 for trigrams).
+    ///
+    /// # Errors
+    /// Returns an error if TF-IDF vectorization fails.
     pub fn new<T>(
         haystack: impl IntoIterator<Item = T>,
         ngram_length: usize,
@@ -110,23 +150,23 @@ impl TFIDFMatcher {
     where
         T: Into<String>,
     {
-        let haystack: Vec<String> = haystack.into_iter().map(Into::into).collect();
-        let processed_haystack: Vec<String> = haystack
-            .iter()
-            .map(|s| Self::text_into_ngrams(&s, ngram_length))
-            .collect();
-
         fn split_by_whitespace(text: &str) -> Vec<&str> {
             text.split_whitespace().collect()
         }
 
+        let haystack: Vec<String> = haystack.into_iter().map(Into::into).collect();
+        let processed_haystack: Vec<String> = haystack
+            .iter()
+            .map(|s| Self::text_into_ngrams(s, ngram_length))
+            .collect();
+
+        let processed_array = Array1::from_vec(processed_haystack);
         let fitted = TfIdfVectorizer::default()
             .convert_to_lowercase(true)
             .tokenizer(Tokenizer::Function(split_by_whitespace))
-            .fit::<String, _>(&Array1::from_vec(processed_haystack.clone()))
-            .expect("TF-IDF training failed");
+            .fit::<String, _>(&processed_array)?;
 
-        let haystack_tfidf = fitted.transform(&Array1::from_vec(processed_haystack))?;
+        let haystack_tfidf = fitted.transform(&processed_array)?;
         Ok(Self {
             haystack,
             fitted,
@@ -136,7 +176,15 @@ impl TFIDFMatcher {
         })
     }
 
-    /// Find
+    /// Finds the top-k matches for a single needle string.
+    ///
+    /// Returns a [`Needle`] containing the query and its ranked matches.
+    ///
+    /// # Errors
+    /// Returns an error if TF-IDF transformation fails.
+    ///
+    /// # Panics
+    /// Panics if the TF-IDF transformation returns an empty result (should not happen).
     pub fn find<'a>(
         &'a self,
         needle: &'a str,
@@ -144,7 +192,6 @@ impl TFIDFMatcher {
     ) -> Result<Needle<'a>, PreprocessingError> {
         let needles_tfidf = self
             .fitted
-            //.transform(&Array1::from_iter([preprocess(needle)]))?;
             .transform(&Array1::from_iter([Self::text_into_ngrams(
                 needle,
                 self.ngram_length,
@@ -164,14 +211,18 @@ impl TFIDFMatcher {
             .collect();
         let k = top_k.min(similarities.len());
         let matches = if k > 0 {
-            similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
-            let top_k = &similarities[..k];
+            // Use partial sort: O(n) selection + O(k log k) sort of top k
+            similarities.select_nth_unstable_by(k - 1, |a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(Equal)
+            });
+            let top_k = &mut similarities[..k];
+            top_k.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
             top_k
                 .iter()
                 .map(|(idx, sim)| MatchEntry {
                     haystack: &self.haystack[*idx],
                     haystack_idx: *idx,
-                    confidence: (*sim * 100.0).round() / 100.0,
+                    confidence: round_confidence(*sim),
                 })
                 .collect()
         } else {
@@ -180,7 +231,13 @@ impl TFIDFMatcher {
         Ok(Needle { needle, matches })
     }
 
-    /// Get active TF-IDF features for a needle
+    /// Returns the indices of active TF-IDF features for a needle.
+    ///
+    /// Useful for debugging and understanding which n-grams are matched.
+    ///
+    /// # Panics
+    /// Panics if TF-IDF transformation fails (should not happen with valid input).
+    #[must_use]
     pub fn features(&self, needle: &str) -> Vec<usize> {
         self.fitted
             .transform(&Array1::from(vec![Self::text_into_ngrams(
@@ -194,7 +251,16 @@ impl TFIDFMatcher {
             .to_vec()
     }
 
-    /// Find many needles using manual dot-products (no full matmul) and a min-heap for top_k largest
+    /// Finds the top-k matches for multiple needle strings.
+    ///
+    /// More efficient than calling [`find`](Self::find) repeatedly due to
+    /// batched TF-IDF transformation and heap-based top-k selection.
+    ///
+    /// # Errors
+    /// Returns an error if TF-IDF transformation fails.
+    ///
+    /// # Panics
+    /// Panics if the TF-IDF transformation returns fewer rows than expected.
     pub fn find_many<'a>(
         &'a self,
         needles: impl Into<Vec<&'a str>>,
@@ -222,11 +288,9 @@ impl TFIDFMatcher {
 
                 if heap.len() < top_k {
                     heap.push(entry);
-                } else if let Some(min_entry) = heap.peek() {
-                    if entry.sim > min_entry.sim {
-                        heap.pop();
-                        heap.push(entry);
-                    }
+                } else if heap.peek().is_some_and(|min_entry| entry.sim > min_entry.sim) {
+                    heap.pop();
+                    heap.push(entry);
                 }
             }
 
@@ -236,7 +300,7 @@ impl TFIDFMatcher {
                 .map(|scored| MatchEntry {
                     haystack: &self.haystack[scored.idx],
                     haystack_idx: scored.idx,
-                    confidence: (scored.sim * 100.0).round() / 100.0,
+                    confidence: round_confidence(scored.sim),
                 })
                 .collect();
 
