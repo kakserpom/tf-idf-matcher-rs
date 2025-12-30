@@ -212,9 +212,8 @@ impl TFIDFMatcher {
         let k = top_k.min(similarities.len());
         let matches = if k > 0 {
             // Use partial sort: O(n) selection + O(k log k) sort of top k
-            similarities.select_nth_unstable_by(k - 1, |a, b| {
-                b.1.partial_cmp(&a.1).unwrap_or(Equal)
-            });
+            similarities
+                .select_nth_unstable_by(k - 1, |a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
             let top_k = &mut similarities[..k];
             top_k.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
             top_k
@@ -288,7 +287,10 @@ impl TFIDFMatcher {
 
                 if heap.len() < top_k {
                     heap.push(entry);
-                } else if heap.peek().is_some_and(|min_entry| entry.sim > min_entry.sim) {
+                } else if heap
+                    .peek()
+                    .is_some_and(|min_entry| entry.sim > min_entry.sim)
+                {
                     heap.pop();
                     heap.push(entry);
                 }

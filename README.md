@@ -1,5 +1,10 @@
 # tf-idf-matcher
 
+[![CI](https://github.com/kakserpom/tf-idf-matcher-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/kakserpom/tf-idf-matcher-rs/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/tf-idf-matcher.svg)](https://crates.io/crates/tf-idf-matcher)
+[![Documentation](https://docs.rs/tf-idf-matcher/badge.svg)](https://docs.rs/tf-idf-matcher)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A lightweight Rust library for approximate string matching using [TF–IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf)
 vectorization and cosine similarity. The matcher
 converts strings into n‑gram [TF–IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) vectors and computes similarity

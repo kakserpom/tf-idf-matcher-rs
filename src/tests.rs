@@ -27,7 +27,7 @@ fn test_text_into_ngrams_lowercase_and_join() {
 fn test_tfidf_matcher_find_short() {
     let matcher = TFIDFMatcher::new(["adf"], 2).expect("Failed to create matcher");
     let result = matcher.find("atf", 2).expect("find failed");
-    println!("{:?}", result);
+    println!("{result:?}");
     assert!(result.matches[0].confidence >= 0.7);
 }
 
@@ -37,7 +37,7 @@ fn test_tfidf_matcher_find() {
         TFIDFMatcher::new(["testddd", "testing", "example"], 3).expect("Failed to create matcher");
     let result = matcher.find("testddd", 2).expect("find failed");
 
-    println!("{:?}", result);
+    println!("{result:?}");
     // The top match for "test" should be itself with 100.0 confidence
     assert!(!result.matches.is_empty());
     assert_eq!(result.matches[0].haystack, "testddd");
@@ -80,7 +80,7 @@ fn test_features_count() {
     let matcher = TFIDFMatcher::new(["test", "testing"], 2).expect("Failed to create matcher");
     let feature_indices = matcher.features("test");
     // "test" has 5 bigrams: "_t", "te", "es", "st", "t_"
-    println!("{:?}", feature_indices);
+    println!("{feature_indices:?}");
     assert_eq!(feature_indices.len(), 5);
 }
 
@@ -102,6 +102,6 @@ fn test_bench() {
     )
     .unwrap();
     let result = matcher.find("putinvladimir", 2).expect("find failed");
-    println!("{:?}", result);
+    println!("{result:?}");
     assert_eq!(result.matches[0].haystack, "Vladimir Putin");
 }
