@@ -3,6 +3,7 @@ use linfa_preprocessing::tf_idf_vectorization::{FittedTfIdfVectorizer, TfIdfVect
 use linfa_preprocessing::{PreprocessingError, Tokenizer};
 use ndarray::Array1;
 use sprs::{CsMat, CsVecView};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::cmp::Ordering::Equal;
 use std::collections::BinaryHeap;
@@ -60,13 +61,35 @@ impl Normalize for CsMat<f64> {
 }
 
 /// A TF-IDF based string matcher for finding approximate matches in a corpus.
+///
+/// Retrieval uses an inverted index (`postings`: feature -> `[(doc, weight)]`) rather than a dense
+/// scan of every document. A query touches only the documents that share at least one n-gram
+/// feature with it, so cost scales with the query's posting lists — not the corpus size. This is
+/// what keeps batch throughput from being bottlenecked on streaming the whole TF-IDF matrix per
+/// query.
 #[derive(Debug, Clone)]
 pub struct TFIDFMatcher {
     haystack: Vec<String>,
     fitted: FittedTfIdfVectorizer,
-    haystack_tfidf: CsMat<f64>,
+    /// Inverted index: `postings[feature]` is the list of `(document index, tf-idf weight)` for
+    /// every document in which that feature (n-gram) occurs.
+    postings: Vec<Vec<(u32, f64)>>,
     haystack_norm: Vec<f64>,
+    n_docs: usize,
     ngram_length: usize,
+}
+
+/// Per-thread scratch for the sparse score accumulator, reused across queries so scoring allocates
+/// nothing steady-state. `scores` is indexed by document; `touched` lists the documents given a
+/// nonzero score this query, so only those are read back and reset (never the whole corpus).
+#[derive(Default)]
+struct ScoreScratch {
+    scores: Vec<f64>,
+    touched: Vec<u32>,
+}
+
+thread_local! {
+    static SCRATCH: RefCell<ScoreScratch> = RefCell::new(ScoreScratch::default());
 }
 
 /// Rounds a similarity score to 2 decimal places.
@@ -143,6 +166,10 @@ impl TFIDFMatcher {
     ///
     /// # Errors
     /// Returns an error if TF-IDF vectorization fails.
+    ///
+    /// # Panics
+    /// Panics if the corpus contains more than `u32::MAX` documents (the inverted index stores
+    /// document indices as `u32`).
     pub fn new<T>(
         haystack: impl IntoIterator<Item = T>,
         ngram_length: usize,
@@ -167,12 +194,87 @@ impl TFIDFMatcher {
             .fit::<String, _>(&processed_array)?;
 
         let haystack_tfidf = fitted.transform(&processed_array)?;
+        let haystack_norm = haystack_tfidf.normalize();
+
+        // Build the inverted index once from the doc-major TF-IDF matrix, then drop the matrix —
+        // the postings hold the same nonzeros, transposed, so memory is unchanged.
+        let n_docs = haystack_tfidf.rows();
+        let mut postings: Vec<Vec<(u32, f64)>> = vec![Vec::new(); haystack_tfidf.cols()];
+        for (doc, row) in haystack_tfidf.outer_iterator().enumerate() {
+            for (feature, &weight) in row.iter() {
+                postings[feature].push((u32::try_from(doc).expect("corpus exceeds u32"), weight));
+            }
+        }
+
         Ok(Self {
             haystack,
             fitted,
-            haystack_norm: haystack_tfidf.normalize(),
-            haystack_tfidf,
+            postings,
+            haystack_norm,
+            n_docs,
             ngram_length,
+        })
+    }
+
+    /// Score a query's sparse TF-IDF vector against the corpus via the inverted index and return the
+    /// top-`top_k` `(document, cosine similarity)` matches, highest first. Only documents sharing a
+    /// feature with the query are visited; the per-thread accumulator is reset in place afterwards.
+    fn top_k_matches<'a>(
+        &'a self,
+        needle_v: CsVecView<f64>,
+        q_norm: f64,
+        top_k: usize,
+    ) -> Vec<MatchEntry<'a>> {
+        if top_k == 0 || q_norm == 0.0 {
+            return Vec::new();
+        }
+        SCRATCH.with(|cell| {
+            let ScoreScratch { scores, touched } = &mut *cell.borrow_mut();
+            if scores.len() < self.n_docs {
+                scores.resize(self.n_docs, 0.0);
+            }
+            // Accumulate dot products: for each query feature, add q_weight * d_weight to every
+            // document carrying that feature, recording first-touch so the reset stays sparse.
+            for (feature, &q_weight) in needle_v.iter() {
+                let Some(list) = self.postings.get(feature) else {
+                    continue;
+                };
+                for &(doc, d_weight) in list {
+                    let score = &mut scores[doc as usize];
+                    if *score == 0.0 {
+                        touched.push(doc);
+                    }
+                    *score += q_weight * d_weight;
+                }
+            }
+
+            let mut heap: BinaryHeap<Scored> = BinaryHeap::with_capacity(top_k + 1);
+            for &doc in touched.iter() {
+                let d = doc as usize;
+                let denom = q_norm * self.haystack_norm[d];
+                let sim = if denom == 0.0 { 0.0 } else { scores[d] / denom };
+                scores[d] = 0.0; // reset in place; `touched` is cleared below
+                let entry = Scored { sim, idx: d };
+                if heap.len() < top_k {
+                    heap.push(entry);
+                } else if heap
+                    .peek()
+                    .is_some_and(|min_entry| entry.sim > min_entry.sim)
+                {
+                    heap.pop();
+                    heap.push(entry);
+                }
+            }
+            touched.clear();
+
+            heap.into_sorted_vec()
+                .into_iter()
+                .map(|scored| MatchEntry {
+                    haystack: &self.haystack[scored.idx],
+                    haystack_idx: scored.idx,
+                    confidence: round_confidence(scored.sim),
+                })
+                .collect()
         })
     }
 
@@ -196,37 +298,9 @@ impl TFIDFMatcher {
                 needle,
                 self.ngram_length,
             )]))?;
-        let needle_v = needles_tfidf.outer_iterator().next().unwrap();
+        let needle_v = needles_tfidf.outer_view(0).unwrap();
         let q_norm = needles_tfidf.normalize()[0];
-        let mut similarities: Vec<(usize, f64)> = self
-            .haystack_tfidf
-            .outer_iterator()
-            .enumerate()
-            .map(|(col_idx, row)| {
-                let dot_val = row.dot(needle_v);
-                let denom = q_norm * self.haystack_norm[col_idx];
-                let sim = if denom == 0.0 { 0.0 } else { dot_val / denom };
-                (col_idx, sim)
-            })
-            .collect();
-        let k = top_k.min(similarities.len());
-        let matches = if k > 0 {
-            // Use partial sort: O(n) selection + O(k log k) sort of top k
-            similarities
-                .select_nth_unstable_by(k - 1, |a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
-            let top_k = &mut similarities[..k];
-            top_k.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Equal));
-            top_k
-                .iter()
-                .map(|(idx, sim)| MatchEntry {
-                    haystack: &self.haystack[*idx],
-                    haystack_idx: *idx,
-                    confidence: round_confidence(*sim),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let matches = self.top_k_matches(needle_v, q_norm, top_k);
         Ok(Needle { needle, matches })
     }
 
@@ -276,36 +350,7 @@ impl TFIDFMatcher {
         let mut results = Vec::with_capacity(needles.len());
         for (i, &needle) in needles.iter().enumerate() {
             let needle_vec: CsVecView<f64> = needles_tfidf.outer_view(i).unwrap();
-            let q_norm = needles_norm[i];
-            let mut heap: BinaryHeap<Scored> = BinaryHeap::with_capacity(top_k + 1);
-
-            for (j, hay_vec) in self.haystack_tfidf.outer_iterator().enumerate() {
-                let dot = needle_vec.dot(&hay_vec);
-                let denom = q_norm * self.haystack_norm[j];
-                let sim = if denom == 0.0 { 0.0 } else { dot / denom };
-                let entry = Scored { sim, idx: j };
-
-                if heap.len() < top_k {
-                    heap.push(entry);
-                } else if heap
-                    .peek()
-                    .is_some_and(|min_entry| entry.sim > min_entry.sim)
-                {
-                    heap.pop();
-                    heap.push(entry);
-                }
-            }
-
-            let matches = heap
-                .into_sorted_vec()
-                .into_iter()
-                .map(|scored| MatchEntry {
-                    haystack: &self.haystack[scored.idx],
-                    haystack_idx: scored.idx,
-                    confidence: round_confidence(scored.sim),
-                })
-                .collect();
-
+            let matches = self.top_k_matches(needle_vec, needles_norm[i], top_k);
             results.push(Needle { needle, matches });
         }
 
