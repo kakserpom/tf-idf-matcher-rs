@@ -295,11 +295,7 @@ impl TFIDFMatcher {
     ///
     /// # Panics
     /// Panics if the TF-IDF transformation returns an empty result (should not happen).
-    pub fn find<'a>(
-        &'a self,
-        needle: &'a str,
-        top_k: usize,
-    ) -> Result<Needle<'a>, MatcherError> {
+    pub fn find<'a>(&'a self, needle: &'a str, top_k: usize) -> Result<Needle<'a>, MatcherError> {
         let needle_ngrams = Self::text_into_ngrams(needle, self.ngram_length);
         let needles_tfidf = self.fitted.transform([needle_ngrams.as_str()]);
         let needle_v = needles_tfidf.outer_view(0).unwrap();
