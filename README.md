@@ -29,7 +29,7 @@ Add this crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tf-idf-matcher = "0.1"
+tf-idf-matcher = "0.2"
 ```
 
 ## Quick Start

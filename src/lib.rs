@@ -1,15 +1,32 @@
 #![warn(clippy::pedantic)]
-use linfa_preprocessing::tf_idf_vectorization::{FittedTfIdfVectorizer, TfIdfVectorizer};
-use linfa_preprocessing::{PreprocessingError, Tokenizer};
-use ndarray::Array1;
 use sprs::{CsMat, CsVecView};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::cmp::Ordering::Equal;
 use std::collections::BinaryHeap;
 
+mod vectorizer;
+use vectorizer::Vectorizer;
+
 #[cfg(test)]
 mod tests;
+
+/// Error type returned by [`TFIDFMatcher`] operations.
+///
+/// The current implementation is infallible, so this type is uninhabited: an `Err` value can never
+/// be constructed. It is kept so the public API stays fallible (`Result`-returning), preserving
+/// source compatibility with call sites that use `?` or `.expect()` and leaving room to introduce
+/// real error conditions later without another breaking change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MatcherError {}
+
+impl std::fmt::Display for MatcherError {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {}
+    }
+}
+
+impl std::error::Error for MatcherError {}
 /// A single match result from the corpus.
 #[derive(Debug, Clone)]
 #[must_use]
@@ -70,7 +87,7 @@ impl Normalize for CsMat<f64> {
 #[derive(Debug, Clone)]
 pub struct TFIDFMatcher {
     haystack: Vec<String>,
-    fitted: FittedTfIdfVectorizer,
+    fitted: Vectorizer,
     /// Inverted index: `postings[feature]` is the list of `(document index, tf-idf weight)` for
     /// every document in which that feature (n-gram) occurs.
     postings: Vec<Vec<(u32, f64)>>,
@@ -165,7 +182,7 @@ impl TFIDFMatcher {
     /// * `ngram_length` - The length of n-grams to use (e.g., 3 for trigrams).
     ///
     /// # Errors
-    /// Returns an error if TF-IDF vectorization fails.
+    /// Currently infallible; the `Result` is retained for API stability (see [`MatcherError`]).
     ///
     /// # Panics
     /// Panics if the corpus contains more than `u32::MAX` documents (the inverted index stores
@@ -173,27 +190,18 @@ impl TFIDFMatcher {
     pub fn new<T>(
         haystack: impl IntoIterator<Item = T>,
         ngram_length: usize,
-    ) -> Result<Self, PreprocessingError>
+    ) -> Result<Self, MatcherError>
     where
         T: Into<String>,
     {
-        fn split_by_whitespace(text: &str) -> Vec<&str> {
-            text.split_whitespace().collect()
-        }
-
         let haystack: Vec<String> = haystack.into_iter().map(Into::into).collect();
         let processed_haystack: Vec<String> = haystack
             .iter()
             .map(|s| Self::text_into_ngrams(s, ngram_length))
             .collect();
 
-        let processed_array = Array1::from_vec(processed_haystack);
-        let fitted = TfIdfVectorizer::default()
-            .convert_to_lowercase(true)
-            .tokenizer(Tokenizer::Function(split_by_whitespace))
-            .fit::<String, _>(&processed_array)?;
-
-        let haystack_tfidf = fitted.transform(&processed_array)?;
+        let fitted = Vectorizer::fit(&processed_haystack);
+        let haystack_tfidf = fitted.transform(&processed_haystack);
         let haystack_norm = haystack_tfidf.normalize();
 
         // Build the inverted index once from the doc-major TF-IDF matrix, then drop the matrix —
@@ -283,7 +291,7 @@ impl TFIDFMatcher {
     /// Returns a [`Needle`] containing the query and its ranked matches.
     ///
     /// # Errors
-    /// Returns an error if TF-IDF transformation fails.
+    /// Currently infallible; the `Result` is retained for API stability (see [`MatcherError`]).
     ///
     /// # Panics
     /// Panics if the TF-IDF transformation returns an empty result (should not happen).
@@ -291,13 +299,9 @@ impl TFIDFMatcher {
         &'a self,
         needle: &'a str,
         top_k: usize,
-    ) -> Result<Needle<'a>, PreprocessingError> {
-        let needles_tfidf = self
-            .fitted
-            .transform(&Array1::from_iter([Self::text_into_ngrams(
-                needle,
-                self.ngram_length,
-            )]))?;
+    ) -> Result<Needle<'a>, MatcherError> {
+        let needle_ngrams = Self::text_into_ngrams(needle, self.ngram_length);
+        let needles_tfidf = self.fitted.transform([needle_ngrams.as_str()]);
         let needle_v = needles_tfidf.outer_view(0).unwrap();
         let q_norm = needles_tfidf.normalize()[0];
         let matches = self.top_k_matches(needle_v, q_norm, top_k);
@@ -309,15 +313,12 @@ impl TFIDFMatcher {
     /// Useful for debugging and understanding which n-grams are matched.
     ///
     /// # Panics
-    /// Panics if TF-IDF transformation fails (should not happen with valid input).
+    /// Panics if the TF-IDF transformation returns an empty result (should not happen).
     #[must_use]
     pub fn features(&self, needle: &str) -> Vec<usize> {
+        let needle_ngrams = Self::text_into_ngrams(needle, self.ngram_length);
         self.fitted
-            .transform(&Array1::from(vec![Self::text_into_ngrams(
-                needle,
-                self.ngram_length,
-            )]))
-            .expect("Transform failed")
+            .transform([needle_ngrams.as_str()])
             .outer_view(0)
             .expect("Outer view failed")
             .indices()
@@ -330,7 +331,7 @@ impl TFIDFMatcher {
     /// batched TF-IDF transformation and heap-based top-k selection.
     ///
     /// # Errors
-    /// Returns an error if TF-IDF transformation fails.
+    /// Currently infallible; the `Result` is retained for API stability (see [`MatcherError`]).
     ///
     /// # Panics
     /// Panics if the TF-IDF transformation returns fewer rows than expected.
@@ -338,13 +339,13 @@ impl TFIDFMatcher {
         &'a self,
         needles: impl Into<Vec<&'a str>>,
         top_k: usize,
-    ) -> Result<Vec<Needle<'a>>, PreprocessingError> {
+    ) -> Result<Vec<Needle<'a>>, MatcherError> {
         let needles: Vec<&str> = needles.into();
-        let needles_tfidf = self.fitted.transform(&Array1::from_iter(
-            needles
-                .iter()
-                .map(|needle| Self::text_into_ngrams(needle, self.ngram_length)),
-        ))?;
+        let needle_ngrams: Vec<String> = needles
+            .iter()
+            .map(|needle| Self::text_into_ngrams(needle, self.ngram_length))
+            .collect();
+        let needles_tfidf = self.fitted.transform(&needle_ngrams);
         let needles_norm = needles_tfidf.normalize();
 
         let mut results = Vec::with_capacity(needles.len());

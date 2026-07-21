@@ -1,5 +1,13 @@
 use super::*;
 
+/// Compile-time assertion that the matcher is shareable across threads. This is the reason the
+/// crate previously depended on a linfa fork; the in-crate vectorizer guarantees it by construction.
+#[test]
+fn matcher_is_send_sync() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<TFIDFMatcher>();
+}
+
 #[test]
 fn test_text_into_ngrams() {
     let result = TFIDFMatcher::text_into_ngrams("abcde", 2);

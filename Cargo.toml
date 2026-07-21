@@ -1,15 +1,20 @@
 [package]
 name = "tf-idf-matcher"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
+description = "Approximate string matching using n-gram TF-IDF vectorization and cosine similarity"
+license = "MIT"
+repository = "https://github.com/kakserpom/tf-idf-matcher-rs"
+documentation = "https://docs.rs/tf-idf-matcher"
+readme = "README.md"
+keywords = ["tf-idf", "string-matching", "fuzzy", "cosine-similarity", "ngram"]
+categories = ["text-processing", "algorithms"]
 
 [workspace]
 
 [dependencies]
-#linfa-preprocessing = { version = "0.7.1", default-features = false }
-linfa-preprocessing = { git = "https://github.com/kakserpom/linfa.git", branch = "linfa-preprocessing-multi-threading", default-features = false }
-ndarray = "0.16"
 sprs = "0.11"
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 criterion = "0.8.1"
