@@ -1,3 +1,6 @@
 /target
 Cargo.lock
+# Ignore root-level dotfiles/dirs (e.g. .idea, .DS_Store) but keep project ones tracked.
 /.*
+!/.gitignore
+!/.github
